@@ -12,7 +12,11 @@ function fakeModel(overrides: Partial<LanguageModelV3> = {}): LanguageModelV3 {
     doGenerate: vi.fn().mockResolvedValue({
       content: [{ type: 'text', text: 'hello' }],
       finishReason: 'stop',
-      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      usage: {
+        inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+        outputTokens: { total: 5 },
+        totalTokens: 15,
+      },
       warnings: [],
     }),
     doStream: vi.fn(),
@@ -100,7 +104,11 @@ describe('wrapModel', () => {
         doGenerate: vi.fn().mockResolvedValue({
           content: [{ type: 'text', text: 'cached' }],
           finishReason: 'stop',
-          usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150, cachedInputTokens: 1000 },
+          usage: {
+            inputTokens: { total: 100, noCache: 0, cacheRead: 1000, cacheWrite: undefined },
+            outputTokens: { total: 50 },
+            totalTokens: 150,
+          },
           warnings: [],
         }),
       }),
@@ -168,7 +176,11 @@ describe('wrapModel', () => {
         {
           type: 'finish',
           finishReason: 'stop',
-          usage: { inputTokens: 20, outputTokens: 8, totalTokens: 28 },
+          usage: {
+            inputTokens: { total: 20, noCache: 20, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 8 },
+            totalTokens: 28,
+          },
         } as never,
       ]),
       { agentName: 'stream', agentType: 'manual' },
@@ -196,7 +208,11 @@ describe('wrapModel', () => {
         {
           type: 'finish',
           finishReason: 'error',
-          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+          usage: {
+            inputTokens: { total: 0 },
+            outputTokens: { total: 0 },
+            totalTokens: 0,
+          },
         } as never,
       ]),
       { agentName: 'stream-err', agentType: 'manual' },

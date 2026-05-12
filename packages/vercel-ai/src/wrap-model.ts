@@ -3,6 +3,7 @@ import type {
   LanguageModelV3,
   LanguageModelV3Middleware,
   LanguageModelV3StreamPart,
+  LanguageModelV3Usage,
 } from '@ai-sdk/provider';
 import { JenzClient, type AgentType, type Run, type Event } from '@jenz-ai/sdk';
 import { runContext } from './als.js';
@@ -15,10 +16,21 @@ export interface WrapModelConfig {
 
 const SDK_VERSION = '0.1.0';
 
-interface UsageLike {
+interface NormalizedUsage {
   inputTokens?: number;
   outputTokens?: number;
-  cachedInputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+}
+
+function normalizeUsage(usage: LanguageModelV3Usage | undefined): NormalizedUsage {
+  if (!usage) return {};
+  return {
+    inputTokens: usage.inputTokens?.total,
+    outputTokens: usage.outputTokens?.total,
+    cacheReadTokens: usage.inputTokens?.cacheRead,
+    cacheWriteTokens: usage.inputTokens?.cacheWrite,
+  };
 }
 
 /**
@@ -57,6 +69,7 @@ export function wrapModel(
 
 function createJenzMiddleware(config: WrapModelConfig): LanguageModelV3Middleware {
   return {
+    specificationVersion: 'v3',
     wrapGenerate: async ({ doGenerate, model }) => {
       const { run, ownedByUs } = await acquireRun(config);
       if (!run) return doGenerate();
@@ -69,11 +82,12 @@ function createJenzMiddleware(config: WrapModelConfig): LanguageModelV3Middlewar
 
       try {
         const result = await doGenerate();
-        const usage = result.usage as UsageLike | undefined;
+        const usage = normalizeUsage(result.usage);
         await evt.finish({
-          inputTokens: usage?.inputTokens,
-          outputTokens: usage?.outputTokens,
-          cacheReadTokens: usage?.cachedInputTokens,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cacheReadTokens: usage.cacheReadTokens,
+          cacheWriteTokens: usage.cacheWriteTokens,
         });
         if (ownedByUs) await run.finish({ status: 'completed' });
         return result;
@@ -108,7 +122,7 @@ function createJenzMiddleware(config: WrapModelConfig): LanguageModelV3Middlewar
       const { stream, ...rest } = streamResult;
       const startMs = Date.now();
       let ttftMs: number | undefined;
-      let usage: UsageLike | undefined;
+      let usage: NormalizedUsage | undefined;
       let errorMessage: string | undefined;
 
       const instrumented = new TransformStream<LanguageModelV3StreamPart, LanguageModelV3StreamPart>({
@@ -117,7 +131,7 @@ function createJenzMiddleware(config: WrapModelConfig): LanguageModelV3Middlewar
             ttftMs = Date.now() - startMs;
           }
           if (chunk.type === 'finish') {
-            usage = chunk.usage as UsageLike;
+            usage = normalizeUsage(chunk.usage);
           }
           if (chunk.type === 'error') {
             const err = (chunk as { error: unknown }).error;
@@ -149,13 +163,14 @@ async function finalizeStreamEvent(
   run: Run,
   ownedByUs: boolean,
   ttftMs: number | undefined,
-  usage: UsageLike | undefined,
+  usage: NormalizedUsage | undefined,
   errorMessage: string | undefined,
 ): Promise<void> {
   await evt.finish({
     inputTokens: usage?.inputTokens,
     outputTokens: usage?.outputTokens,
-    cacheReadTokens: usage?.cachedInputTokens,
+    cacheReadTokens: usage?.cacheReadTokens,
+    cacheWriteTokens: usage?.cacheWriteTokens,
     ttftMs,
     errorMessage,
   });
