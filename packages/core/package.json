@@ -18,7 +18,10 @@
       }
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "license": "MIT",
   "homepage": "https://github.com/jenz-ai/sdk/tree/main/packages/core",
   "repository": {
@@ -27,7 +30,15 @@
     "directory": "packages/core"
   },
   "bugs": "https://github.com/jenz-ai/sdk/issues",
-  "keywords": ["ai", "agent", "observability", "tracing", "llm", "telemetry", "jenz"],
+  "keywords": [
+    "ai",
+    "agent",
+    "observability",
+    "tracing",
+    "llm",
+    "telemetry",
+    "jenz"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -38,7 +49,9 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@hono/node-server": "^2.0.2",
     "@types/node": "^22.9.0",
+    "hono": "^4.12.18",
     "tsup": "^8.3.5",
     "typescript": "^5.6.2",
     "vitest": "^2.1.5"
