@@ -23,4 +23,4 @@ export type {
 } from './event.js';
 export type { TransportOptions } from './transport.js';
 
-export const SDK_VERSION = '1.0.0';
+export const SDK_VERSION = '1.1.0';

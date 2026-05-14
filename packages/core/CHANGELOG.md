@@ -1,5 +1,16 @@
 # @jenz-ai/sdk
 
+## 1.1.0
+
+### Minor Changes
+
+- feat: add Run.updateAvailableTools for incremental tool discovery
+
+  PATCHes /v1/runs/{id} with `toolsAvailable` so adapters can populate the
+  canonical tools column incrementally as agents are discovered (e.g. OpenAI
+  Agents handoffs). Server merges union/dedup. Fires the run's AbortSignal
+  if the response includes `stopRequested=true`.
+
 ## 1.0.0
 
 ### Major Changes

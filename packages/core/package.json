@@ -1,6 +1,6 @@
 {
   "name": "@jenz-ai/sdk",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Core client SDK for Jenz — observability for AI agents (runs, events, costs, latency).",
   "type": "module",
   "main": "./dist/index.cjs",
