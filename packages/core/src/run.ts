@@ -89,6 +89,22 @@ export class Run {
     if (res?.stopRequested) this.maybeAbort();
   }
 
+  /**
+   * Tell the backend about tools this run has access to. Idempotent and additive
+   * — the server merges with any existing list (union, dedup). Adapters call this
+   * incrementally as agents (and their tools) are discovered mid-run.
+   *
+   * Passing an empty array is a no-op (no network call, no stop-signal check).
+   * Use `heartbeat()` when you need to poll for remote stop without other state.
+   */
+  async updateAvailableTools(names: string[]): Promise<void> {
+    if (!names.length) return;
+    const res = await this.transport.patch<HeartbeatResponse>(`/v1/runs/${this.id}`, {
+      toolsAvailable: names,
+    });
+    if (res?.stopRequested) this.maybeAbort();
+  }
+
   async finish(input: RunFinishInput): Promise<void> {
     if (this.finished) throw new Error('Run already finished');
     this.finished = true;

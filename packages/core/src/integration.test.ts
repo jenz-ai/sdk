@@ -106,4 +106,32 @@ describe('core SDK integration against fake backend', () => {
     await run!.heartbeat();
     expect(run!.signal.aborted).toBe(true);
   });
+
+  it('updateAvailableTools merges in the fake backend (PATCH round-trip)', async () => {
+    const client = new JenzClient({ apiKey: 'test', baseUrl });
+    const run = await client.startRun({
+      agentName: 'tools-test',
+      agentType: 'manual',
+      toolsAvailable: ['initial_tool'],
+    });
+    expect(run).not.toBeNull();
+    await run!.updateAvailableTools(['new_tool_a', 'new_tool_b']);
+    expect(receivedPatches.at(-1)).toEqual({
+      id: 'fake-run-id',
+      body: { toolsAvailable: ['new_tool_a', 'new_tool_b'] },
+    });
+  });
+
+  it('updateAvailableTools fires AbortSignal when fake backend says stopRequested', async () => {
+    const client = new JenzClient({ apiKey: 'test', baseUrl });
+    const run = await client.startRun({
+      agentName: 'stop-via-update',
+      agentType: 'manual',
+    });
+    expect(run).not.toBeNull();
+    expect(run!.signal.aborted).toBe(false);
+    stopFlag = true;
+    await run!.updateAvailableTools(['t']);
+    expect(run!.signal.aborted).toBe(true);
+  });
 });

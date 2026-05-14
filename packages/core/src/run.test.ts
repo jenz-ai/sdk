@@ -82,4 +82,42 @@ describe('Run', () => {
     await evt2.finish({});
     expect(firstReason).toHaveLength(1);
   });
+
+  it('updateAvailableTools PATCHes /v1/runs/:id with the names array', async () => {
+    const t = fakeTransport();
+    const run = new Run({ transport: t, runId: 'r1' });
+    await run.updateAvailableTools(['search_web', 'lookup_account']);
+    expect(t.patch).toHaveBeenCalledWith('/v1/runs/r1', {
+      toolsAvailable: ['search_web', 'lookup_account'],
+    });
+  });
+
+  it('updateAvailableTools fires AbortSignal when backend returns stopRequested', async () => {
+    const t = {
+      post: vi.fn(),
+      patch: vi.fn().mockResolvedValue({ ok: true, stopRequested: true }),
+      get: vi.fn(),
+    } as unknown as Transport;
+    const run = new Run({ transport: t, runId: 'r1' });
+    expect(run.signal.aborted).toBe(false);
+    await run.updateAvailableTools(['x']);
+    expect(run.signal.aborted).toBe(true);
+  });
+
+  it('updateAvailableTools swallows null transport response', async () => {
+    const t = {
+      post: vi.fn(),
+      patch: vi.fn().mockResolvedValue(null),
+      get: vi.fn(),
+    } as unknown as Transport;
+    const run = new Run({ transport: t, runId: 'r1' });
+    await expect(run.updateAvailableTools(['x'])).resolves.toBeUndefined();
+  });
+
+  it('updateAvailableTools is a no-op on empty array (no network call)', async () => {
+    const t = fakeTransport();
+    const run = new Run({ transport: t, runId: 'r1' });
+    await run.updateAvailableTools([]);
+    expect(t.patch).not.toHaveBeenCalled();
+  });
 });
