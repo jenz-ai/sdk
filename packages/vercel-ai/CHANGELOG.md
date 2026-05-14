@@ -1,5 +1,11 @@
 # @jenz-ai/vercel-ai
 
+## 0.1.1
+
+### Patch Changes
+
+- Fix `@jenz-ai/sdk` dependency in published package — 0.1.0 had the literal `workspace:^` protocol string instead of a real npm version range (caused by publishing via `npm publish` instead of `pnpm publish`). 0.1.1 has the correct `^1.0.0` range.
+
 ## 0.1.0
 
 ### Minor Changes
