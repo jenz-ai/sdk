@@ -52,7 +52,8 @@
     "@jenz-ai/sdk": "workspace:^"
   },
   "peerDependencies": {
-    "@openai/agents": ">=0.11.0"
+    "@openai/agents": ">=0.11.0",
+    "@openai/agents-core": ">=0.11.0"
   },
   "devDependencies": {
     "@openai/agents": "^0.11.4",

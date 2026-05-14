@@ -2,8 +2,7 @@ import type { TracingProcessor, Span, Trace } from '@openai/agents-core';
 import type { JenzClient, Run, AgentType } from '@jenz-ai/sdk';
 import { runContext } from './als.js';
 import { mapSpanToEvent } from './span-mapping.js';
-
-const SDK_VERSION = '0.1.0';
+import { SDK_VERSION } from './version.js';
 
 export interface ProcessorConfig {
   defaultAgentType?: AgentType;

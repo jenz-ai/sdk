@@ -1,7 +1,7 @@
 import { JenzClient, type AgentType, type Run } from '@jenz-ai/sdk';
 import { runContext } from './als.js';
+import { SDK_VERSION } from './version.js';
 
-const SDK_VERSION = '0.1.0';
 let dormantWarningShown = false;
 
 export interface WithRunInput {
