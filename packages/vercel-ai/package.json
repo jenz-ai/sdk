@@ -18,7 +18,10 @@
       }
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "license": "MIT",
   "homepage": "https://github.com/jenz-ai/sdk/tree/main/packages/vercel-ai",
   "repository": {
@@ -27,7 +30,15 @@
     "directory": "packages/vercel-ai"
   },
   "bugs": "https://github.com/jenz-ai/sdk/issues",
-  "keywords": ["ai", "agent", "observability", "vercel-ai", "vercel", "tracing", "jenz"],
+  "keywords": [
+    "ai",
+    "agent",
+    "observability",
+    "vercel-ai",
+    "vercel",
+    "tracing",
+    "jenz"
+  ],
   "publishConfig": {
     "access": "public"
   },
