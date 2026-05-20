@@ -1,6 +1,6 @@
 {
   "name": "@jenz-ai/openai-agents",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Zero-config OpenAI Agents SDK adapter for Jenz observability.",
   "type": "module",
   "main": "./dist/index.cjs",
