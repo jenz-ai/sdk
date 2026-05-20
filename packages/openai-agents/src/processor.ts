@@ -70,6 +70,14 @@ export class JenzTracingProcessor implements TracingProcessor {
           additions.forEach((t) => state.toolsSeen.add(t));
           await state.run.updateAvailableTools([...state.toolsSeen]);
         }
+      } else if (data?.type === 'function') {
+        // Real @openai/agents-core emits agent spans with tools: [] on start,
+        // so we harvest tool names from function spans as they actually fire.
+        const name = typeof data.name === 'string' ? data.name : '';
+        if (name && !state.toolsSeen.has(name)) {
+          state.toolsSeen.add(name);
+          await state.run.updateAvailableTools([...state.toolsSeen]);
+        }
       }
     } catch {
       /* swallow */

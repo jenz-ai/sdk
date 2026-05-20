@@ -94,6 +94,36 @@ describe('JenzTracingProcessor', () => {
     ]);
   });
 
+  it('onSpanStart(function) harvests tool name when agent span had empty tools (real SDK shape)', async () => {
+    const run = fakeRun();
+    const p = new JenzTracingProcessor(fakeClient(run), {});
+    await p.onTraceStart(fakeTrace());
+    // Mirror real SDK: agent span fires with tools: [] on start
+    await p.onSpanStart(fakeSpan({ type: 'agent', name: 'phase2b-e2e', tools: [] }));
+    // Function span fires next with the actual tool name
+    await p.onSpanStart(
+      fakeSpan({ type: 'function', name: 'echo', input: '{}', output: '' }),
+    );
+    expect(run.updateAvailableTools).toHaveBeenCalledWith(['echo']);
+  });
+
+  it('onSpanStart(function) merges + dedups across multiple function spans', async () => {
+    const run = fakeRun();
+    const p = new JenzTracingProcessor(fakeClient(run), {});
+    await p.onTraceStart(fakeTrace());
+    await p.onSpanStart(fakeSpan({ type: 'agent', name: 'a', tools: [] }));
+    await p.onSpanStart(
+      fakeSpan({ type: 'function', name: 'echo', input: '{}', output: '' }),
+    );
+    await p.onSpanStart(
+      fakeSpan({ type: 'function', name: 'lookup', input: '{}', output: '' }),
+    );
+    expect((run.updateAvailableTools as any).mock.calls).toEqual([
+      [['echo']],
+      [['echo', 'lookup']],
+    ]);
+  });
+
   it('onSpanEnd(generation) emits llm_call event on the bound Run', async () => {
     const run = fakeRun();
     const p = new JenzTracingProcessor(fakeClient(run), {});
