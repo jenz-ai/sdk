@@ -42,7 +42,23 @@ export const query: typeof claudeQuery = (params) => {
   const upstream = claudeQuery(wrappedParams) as any;
   const wrapped = wrapQueryStream(upstream, runPromise);
 
-  runPromise.then((run) => { if (run) runContext.enterWith({ run }); }).catch(() => { /* swallow */ });
+  runPromise.then((run) => {
+    if (!run) return;
+    runContext.enterWith({ run });
+    // Phase 3 remote-stop: dashboard `POST /api/runs/:id/kill` flips
+    // `Run.stopRequested`, which core observes in the next event-POST response
+    // and synchronously fires `run.signal`. The `aborted` check covers the
+    // race where that happens before this `.then` callback runs.
+    const onAbort = () => {
+      try {
+        (upstream as { interrupt?: () => unknown }).interrupt?.();
+      } catch (err) {
+        console.warn('[@jenz-ai/claude-agent-sdk] upstream.interrupt() threw', err);
+      }
+    };
+    if (run.signal.aborted) onAbort();
+    else run.signal.addEventListener('abort', onAbort, { once: true });
+  }).catch(() => { /* swallow */ });
 
   return new Proxy(wrapped as any, {
     get(target, prop) {

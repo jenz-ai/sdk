@@ -143,3 +143,50 @@ describe('integration: full query() round-trip against fake Hono backend', () =>
     expect(finish!.body.errorMessage).toBe('upstream-failed');
   });
 });
+
+describe('integration: backend stopRequested → upstream.interrupt()', () => {
+  let server: ServerType;
+  let baseUrl: string;
+  const origKey = process.env.JENZ_API_KEY;
+  const origBase = process.env.JENZ_BASE_URL;
+
+  beforeEach(async () => {
+    __resetClientForTests();
+    claudeQueryMock.mockReset();
+    const app = new Hono();
+    app.post('/v1/runs', (c) => c.json({ runId: 'fake-run-stop' }));
+    app.patch('/v1/runs/:id', async (c) => { await c.req.json(); return c.json({ ok: true, stopRequested: false }); });
+    app.post('/v1/events', async (c) => { await c.req.json(); return c.json({ eventId: 'evt-stop', stopRequested: true }); });
+    await new Promise<void>((resolve) => {
+      server = serve({ fetch: app.fetch, port: 0 }, () => resolve());
+    });
+    const addr = (server as any).address() as AddressInfo;
+    baseUrl = `http://127.0.0.1:${addr.port}`;
+    process.env.JENZ_API_KEY = 'jk_integration_test';
+    process.env.JENZ_BASE_URL = baseUrl;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (origKey === undefined) delete process.env.JENZ_API_KEY; else process.env.JENZ_API_KEY = origKey;
+    if (origBase === undefined) delete process.env.JENZ_BASE_URL; else process.env.JENZ_BASE_URL = origBase;
+  });
+
+  it('calls upstream.interrupt() exactly once when backend signals stopRequested via an event response', async () => {
+    const interruptSpy = vi.fn();
+
+    claudeQueryMock.mockImplementation(() => {
+      const iter = upstreamFromMsgs([
+        { type: 'assistant', message: { model: 'claude-sonnet-4-6', usage: { input_tokens: 5, output_tokens: 3 } } },
+        { type: 'result', subtype: 'success', result: 'ok', total_cost_usd: 0.001, duration_ms: 100, num_turns: 1 },
+      ]);
+      return Object.assign(iter, { interrupt: interruptSpy });
+    });
+
+    for await (const _ of query({ prompt: 'hello', options: { agent: 'demo' } } as any)) { /* drain */ }
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(interruptSpy).toHaveBeenCalledTimes(1);
+  });
+});
