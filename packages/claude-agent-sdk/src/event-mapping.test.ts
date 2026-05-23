@@ -8,8 +8,8 @@ function fakeAssistantMessage(opts: {
   model?: string;
   inputTokens?: number;
   outputTokens?: number;
-  cacheReadTokens?: number | null;
-  cacheWriteTokens?: number | null;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
 }) {
   return {
     type: 'assistant' as const,
@@ -18,8 +18,8 @@ function fakeAssistantMessage(opts: {
       usage: {
         input_tokens: opts.inputTokens ?? 100,
         output_tokens: opts.outputTokens ?? 50,
-        cache_read_input_tokens: opts.cacheReadTokens ?? undefined,
-        cache_creation_input_tokens: opts.cacheWriteTokens ?? undefined,
+        cache_read_input_tokens: opts.cacheReadTokens,
+        cache_creation_input_tokens: opts.cacheWriteTokens,
       },
     },
     parent_tool_use_id: null,
@@ -48,8 +48,8 @@ describe('mapAssistantMessage', () => {
     expect(finish.cacheWriteTokens).toBe(512);
   });
 
-  it('returns null cache tokens when upstream omits them (not 0, not undefined → null on the boundary)', () => {
-    const msg = fakeAssistantMessage({ cacheReadTokens: null, cacheWriteTokens: null });
+  it('omits cache token fields when upstream does not include them', () => {
+    const msg = fakeAssistantMessage({});
     const { finish } = mapAssistantMessage(msg);
     expect(finish.cacheReadTokens).toBeUndefined();
     expect(finish.cacheWriteTokens).toBeUndefined();
@@ -63,11 +63,11 @@ describe('mapAssistantMessage', () => {
     expect(start.provider).toBe('anthropic');
   });
 
-  it('handles missing usage gracefully (zero tokens fallback)', () => {
+  it('handles missing usage gracefully (undefined tokens passthrough)', () => {
     const msg = fakeAssistantMessage({});
     delete (msg.message as any).usage;
     const { finish } = mapAssistantMessage(msg);
-    expect(finish.inputTokens).toBe(0);
-    expect(finish.outputTokens).toBe(0);
+    expect(finish.inputTokens).toBeUndefined();
+    expect(finish.outputTokens).toBeUndefined();
   });
 });

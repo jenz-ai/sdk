@@ -30,8 +30,8 @@ export function mapAssistantMessage(msg: AssistantMessageLike): MappedEvent {
       provider: 'anthropic',
     },
     finish: {
-      inputTokens: usage?.input_tokens ?? 0,
-      outputTokens: usage?.output_tokens ?? 0,
+      inputTokens: usage?.input_tokens,
+      outputTokens: usage?.output_tokens,
       cacheReadTokens: usage?.cache_read_input_tokens,
       cacheWriteTokens: usage?.cache_creation_input_tokens,
     },
