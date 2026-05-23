@@ -43,9 +43,15 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.3.150
         version: 0.3.150(@anthropic-ai/sdk@0.98.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(zod@4.4.3)
+      '@hono/node-server':
+        specifier: ^2.0.2
+        version: 2.0.2(hono@4.12.18)
       '@types/node':
         specifier: ^22.9.0
         version: 22.19.19
+      hono:
+        specifier: ^4.12.18
+        version: 4.12.18
       tsup:
         specifier: ^8.3.5
         version: 8.5.1(postcss@8.5.14)(tsx@4.21.0)(typescript@5.9.3)
