@@ -41,6 +41,8 @@ export function mapAssistantMessage(msg: AssistantMessageLike): MappedEvent {
 const TOOL_INPUT_LIMIT = 4096;
 
 function safeStringify(value: unknown): string {
+  if (value === undefined) return '';
+  if (value === null) return 'null';
   if (typeof value === 'string') return value;
   try {
     return JSON.stringify(value);

@@ -110,6 +110,17 @@ describe('mapPreToolUse', () => {
     const { start } = mapPreToolUse(input);
     expect((start.input ?? '').length).toBeLessThanOrEqual(4096);
   });
+
+  it('handles undefined tool_input without throwing', () => {
+    const input = {
+      hook_event_name: 'PreToolUse' as const,
+      tool_use_id: 'tu-undef',
+      tool_name: 'X',
+      tool_input: undefined,
+    };
+    const { start } = mapPreToolUse(input);
+    expect(start.input).toBe('');
+  });
 });
 
 describe('mapPostToolUse', () => {
@@ -138,6 +149,18 @@ describe('mapPostToolUse', () => {
     const { finish } = mapPostToolUse(input);
     expect(finish.output).toBe(JSON.stringify({ nested: { value: 42 } }));
   });
+
+  it('handles undefined tool_response without throwing', () => {
+    const input = {
+      hook_event_name: 'PostToolUse' as const,
+      tool_use_id: 'tu-undef',
+      tool_name: 'X',
+      tool_input: {},
+      tool_response: undefined,
+    };
+    const { finish } = mapPostToolUse(input);
+    expect(finish.output).toBe('');
+  });
 });
 
 describe('mapPostToolUseFailure', () => {
@@ -164,5 +187,17 @@ describe('mapPostToolUseFailure', () => {
     };
     const { finish } = mapPostToolUseFailure(input);
     expect(finish.errorMessage).toContain('ENOENT');
+  });
+
+  it('handles undefined error without throwing', () => {
+    const input = {
+      hook_event_name: 'PostToolUseFailure' as const,
+      tool_use_id: 'tu-undef',
+      tool_name: 'X',
+      tool_input: {},
+      error: undefined,
+    };
+    const { finish } = mapPostToolUseFailure(input);
+    expect(finish.errorMessage).toBe('');
   });
 });
