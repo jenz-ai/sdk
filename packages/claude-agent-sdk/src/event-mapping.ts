@@ -55,6 +55,31 @@ function clip(s: string, max = TOOL_INPUT_LIMIT): string {
   return s.length <= max ? s : s.slice(0, max - 1) + '…';
 }
 
+/**
+ * Best-effort detection of the upstream service from a tool name. Used to set
+ * `Event.integration` so the jenz dashboard can render a brand logo per
+ * tool_call. Returns undefined for built-in / unknown tools — the dashboard
+ * falls back to a generic icon.
+ *
+ * Claude Code MCP tools follow the convention `mcp__<plugin>__<tool>`. Plugin
+ * names usually look like `claude_ai_Linear` or `plugin_slack_slack`; the first
+ * underscore-segment after stripping the conventional prefixes is the service
+ * name (e.g. `linear`, `slack`, `sentry`, `vercel`).
+ *
+ * Built-in tools (`Bash`, `Read`, `Edit`, `Glob`, ...) return undefined.
+ */
+export function detectIntegration(toolName: string): string | undefined {
+  if (!toolName.startsWith('mcp__')) return undefined;
+  const parts = toolName.split('__');
+  if (parts.length < 3) return undefined;
+  const plugin = parts[1]
+    .toLowerCase()
+    .replace(/^claude_ai_/, '')
+    .replace(/^plugin_/, '');
+  const first = plugin.split('_')[0];
+  return first || undefined;
+}
+
 // Structural types — see Task 6 contract test for real-SDK conformance.
 export interface PreToolUseInput {
   hook_event_name: 'PreToolUse';
@@ -95,6 +120,7 @@ export function mapPreToolUse(input: PreToolUseInput): MappedToolStart {
     start: {
       type: 'tool_call',
       name: input.tool_name,
+      integration: detectIntegration(input.tool_name),
       input: clip(safeStringify(input.tool_input)),
     },
     toolUseId: input.tool_use_id,

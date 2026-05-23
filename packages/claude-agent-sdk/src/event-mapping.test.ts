@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapAssistantMessage, mapPreToolUse, mapPostToolUse, mapPostToolUseFailure } from './event-mapping.js';
+import { mapAssistantMessage, mapPreToolUse, mapPostToolUse, mapPostToolUseFailure, detectIntegration } from './event-mapping.js';
 
 // Minimal SDKAssistantMessage shape — we only read what we map.
 // Real shape: { type:'assistant', message: BetaMessage, parent_tool_use_id, uuid, session_id }
@@ -120,6 +120,68 @@ describe('mapPreToolUse', () => {
     };
     const { start } = mapPreToolUse(input);
     expect(start.input).toBe('');
+  });
+
+  it('populates integration from MCP tool name (claude_ai_*)', () => {
+    const input = {
+      hook_event_name: 'PreToolUse' as const,
+      tool_use_id: 'tu-1',
+      tool_name: 'mcp__claude_ai_Linear__list_issues',
+      tool_input: {},
+    };
+    const { start } = mapPreToolUse(input);
+    expect(start.integration).toBe('linear');
+  });
+
+  it('populates integration from MCP tool name (plugin_*)', () => {
+    const input = {
+      hook_event_name: 'PreToolUse' as const,
+      tool_use_id: 'tu-1',
+      tool_name: 'mcp__plugin_slack_slack__send_message',
+      tool_input: {},
+    };
+    const { start } = mapPreToolUse(input);
+    expect(start.integration).toBe('slack');
+  });
+
+  it('integration is undefined for built-in tools (Bash, Read, etc.)', () => {
+    const input = {
+      hook_event_name: 'PreToolUse' as const,
+      tool_use_id: 'tu-1',
+      tool_name: 'Bash',
+      tool_input: { command: 'ls' },
+    };
+    const { start } = mapPreToolUse(input);
+    expect(start.integration).toBeUndefined();
+  });
+});
+
+describe('detectIntegration', () => {
+  it('extracts service from mcp__claude_ai_<Service>__<tool>', () => {
+    expect(detectIntegration('mcp__claude_ai_Linear__list_issues')).toBe('linear');
+    expect(detectIntegration('mcp__claude_ai_Vercel__deploy')).toBe('vercel');
+    expect(detectIntegration('mcp__claude_ai_Notion__authenticate')).toBe('notion');
+    expect(detectIntegration('mcp__claude_ai_Higgsfield__generate_image')).toBe('higgsfield');
+  });
+
+  it('extracts service from mcp__plugin_<service>_<service>__<tool>', () => {
+    expect(detectIntegration('mcp__plugin_slack_slack__send_message')).toBe('slack');
+    expect(detectIntegration('mcp__plugin_sentry_sentry__find_issues')).toBe('sentry');
+    expect(detectIntegration('mcp__plugin_supabase_supabase__authenticate')).toBe('supabase');
+    expect(detectIntegration('mcp__plugin_stripe_stripe__authenticate')).toBe('stripe');
+  });
+
+  it('returns undefined for non-MCP tools', () => {
+    expect(detectIntegration('Bash')).toBeUndefined();
+    expect(detectIntegration('Read')).toBeUndefined();
+    expect(detectIntegration('ToolSearch')).toBeUndefined();
+    expect(detectIntegration('subagent:reviewer')).toBeUndefined();
+    expect(detectIntegration('')).toBeUndefined();
+  });
+
+  it('returns undefined for malformed MCP names', () => {
+    expect(detectIntegration('mcp__')).toBeUndefined();
+    expect(detectIntegration('mcp__foo')).toBeUndefined();
   });
 });
 
