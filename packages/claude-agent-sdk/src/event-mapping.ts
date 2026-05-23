@@ -115,3 +115,47 @@ export function mapPostToolUseFailure(input: PostToolUseFailureInput): MappedToo
     toolUseId: input.tool_use_id,
   };
 }
+
+export interface SubagentStartInput {
+  hook_event_name: 'SubagentStart';
+  agent_id: string;
+  agent_type: string;
+}
+
+export interface SubagentStopInput {
+  hook_event_name: 'SubagentStop';
+  stop_hook_active: boolean;
+  agent_id: string;
+  agent_transcript_path: string;
+  agent_type: string;
+  last_assistant_message?: string;
+}
+
+export interface MappedSubagentStart {
+  start: StartEventInput;
+  subagentId: string;
+}
+
+export interface MappedSubagentStop {
+  finish: EventFinishInput;
+  subagentId: string;
+}
+
+export function mapSubagentStart(input: SubagentStartInput): MappedSubagentStart {
+  return {
+    start: {
+      type: 'tool_call',
+      name: `subagent:${input.agent_type}`,
+    },
+    subagentId: input.agent_id,
+  };
+}
+
+export function mapSubagentStop(input: SubagentStopInput): MappedSubagentStop {
+  return {
+    finish: {
+      output: input.last_assistant_message,
+    },
+    subagentId: input.agent_id,
+  };
+}

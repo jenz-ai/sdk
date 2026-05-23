@@ -201,3 +201,47 @@ describe('mapPostToolUseFailure', () => {
     expect(finish.errorMessage).toBe('');
   });
 });
+
+import { mapSubagentStart, mapSubagentStop } from './event-mapping.js';
+
+describe('mapSubagentStart', () => {
+  it('names the tool_call subagent:<agent_type> and uses agent_id as correlation key', () => {
+    const input = {
+      hook_event_name: 'SubagentStart' as const,
+      agent_id: 'sub-abc-123',
+      agent_type: 'code-reviewer',
+    };
+    const { start, subagentId } = mapSubagentStart(input);
+    expect(start.type).toBe('tool_call');
+    expect(start.name).toBe('subagent:code-reviewer');
+    expect(subagentId).toBe('sub-abc-123');
+  });
+});
+
+describe('mapSubagentStop', () => {
+  it('returns last_assistant_message as output when present', () => {
+    const input = {
+      hook_event_name: 'SubagentStop' as const,
+      stop_hook_active: false,
+      agent_id: 'sub-1',
+      agent_transcript_path: '/tmp/transcript.jsonl',
+      agent_type: 'code-reviewer',
+      last_assistant_message: 'Done reviewing — 3 issues found.',
+    };
+    const { finish, subagentId } = mapSubagentStop(input);
+    expect(subagentId).toBe('sub-1');
+    expect(finish.output).toBe('Done reviewing — 3 issues found.');
+  });
+
+  it('finishes without output when last_assistant_message is absent', () => {
+    const input = {
+      hook_event_name: 'SubagentStop' as const,
+      stop_hook_active: false,
+      agent_id: 'sub-1',
+      agent_transcript_path: '/tmp/transcript.jsonl',
+      agent_type: 'code-reviewer',
+    };
+    const { finish } = mapSubagentStop(input);
+    expect(finish.output).toBeUndefined();
+  });
+});
