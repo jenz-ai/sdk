@@ -37,3 +37,79 @@ export function mapAssistantMessage(msg: AssistantMessageLike): MappedEvent {
     },
   };
 }
+
+const TOOL_INPUT_LIMIT = 4096;
+
+function safeStringify(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function clip(s: string, max = TOOL_INPUT_LIMIT): string {
+  return s.length <= max ? s : s.slice(0, max - 1) + '…';
+}
+
+// Structural types — see Task 6 contract test for real-SDK conformance.
+export interface PreToolUseInput {
+  hook_event_name: 'PreToolUse';
+  tool_use_id: string;
+  tool_name: string;
+  tool_input: unknown;
+}
+
+export interface PostToolUseInput {
+  hook_event_name: 'PostToolUse';
+  tool_use_id: string;
+  tool_name: string;
+  tool_input: unknown;
+  tool_response: unknown;
+}
+
+export interface PostToolUseFailureInput {
+  hook_event_name: 'PostToolUseFailure';
+  tool_use_id: string;
+  tool_name: string;
+  tool_input: unknown;
+  error: unknown;
+}
+
+export interface MappedToolStart {
+  start: StartEventInput;
+  toolUseId: string;
+  toolName: string;
+}
+
+export interface MappedToolFinish {
+  finish: EventFinishInput;
+  toolUseId: string;
+}
+
+export function mapPreToolUse(input: PreToolUseInput): MappedToolStart {
+  return {
+    start: {
+      type: 'tool_call',
+      name: input.tool_name,
+      input: clip(safeStringify(input.tool_input)),
+    },
+    toolUseId: input.tool_use_id,
+    toolName: input.tool_name,
+  };
+}
+
+export function mapPostToolUse(input: PostToolUseInput): MappedToolFinish {
+  return {
+    finish: { output: clip(safeStringify(input.tool_response)) },
+    toolUseId: input.tool_use_id,
+  };
+}
+
+export function mapPostToolUseFailure(input: PostToolUseFailureInput): MappedToolFinish {
+  return {
+    finish: { errorMessage: clip(safeStringify(input.error)) },
+    toolUseId: input.tool_use_id,
+  };
+}

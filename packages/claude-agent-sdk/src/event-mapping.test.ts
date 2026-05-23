@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapAssistantMessage } from './event-mapping.js';
+import { mapAssistantMessage, mapPreToolUse, mapPostToolUse, mapPostToolUseFailure } from './event-mapping.js';
 
 // Minimal SDKAssistantMessage shape — we only read what we map.
 // Real shape: { type:'assistant', message: BetaMessage, parent_tool_use_id, uuid, session_id }
@@ -69,5 +69,100 @@ describe('mapAssistantMessage', () => {
     const { finish } = mapAssistantMessage(msg);
     expect(finish.inputTokens).toBeUndefined();
     expect(finish.outputTokens).toBeUndefined();
+  });
+});
+
+describe('mapPreToolUse', () => {
+  it('extracts tool_name + tool_input + tool_use_id', () => {
+    const input = {
+      hook_event_name: 'PreToolUse' as const,
+      tool_use_id: 'tu-123',
+      tool_name: 'Read',
+      tool_input: { file_path: '/etc/hosts' },
+    };
+    const { start, toolUseId, toolName } = mapPreToolUse(input);
+    expect(start.type).toBe('tool_call');
+    expect(start.name).toBe('Read');
+    expect(start.input).toBe(JSON.stringify({ file_path: '/etc/hosts' }));
+    expect(toolUseId).toBe('tu-123');
+    expect(toolName).toBe('Read');
+  });
+
+  it('handles empty tool_input', () => {
+    const input = {
+      hook_event_name: 'PreToolUse' as const,
+      tool_use_id: 'tu-1',
+      tool_name: 'NoArgsTool',
+      tool_input: {},
+    };
+    const { start } = mapPreToolUse(input);
+    expect(start.input).toBe('{}');
+  });
+
+  it('caps tool_input serialization at 4kB to avoid sending huge JSON blobs', () => {
+    const huge = { data: 'x'.repeat(10_000) };
+    const input = {
+      hook_event_name: 'PreToolUse' as const,
+      tool_use_id: 'tu-1',
+      tool_name: 'X',
+      tool_input: huge,
+    };
+    const { start } = mapPreToolUse(input);
+    expect((start.input ?? '').length).toBeLessThanOrEqual(4096);
+  });
+});
+
+describe('mapPostToolUse', () => {
+  it('extracts tool_response as output (success)', () => {
+    const input = {
+      hook_event_name: 'PostToolUse' as const,
+      tool_use_id: 'tu-123',
+      tool_name: 'Read',
+      tool_input: { file_path: '/etc/hosts' },
+      tool_response: '127.0.0.1 localhost',
+    };
+    const { finish, toolUseId } = mapPostToolUse(input);
+    expect(toolUseId).toBe('tu-123');
+    expect(finish.output).toBe('127.0.0.1 localhost');
+    expect(finish.errorMessage).toBeUndefined();
+  });
+
+  it('stringifies non-string tool_response', () => {
+    const input = {
+      hook_event_name: 'PostToolUse' as const,
+      tool_use_id: 'tu-1',
+      tool_name: 'X',
+      tool_input: {},
+      tool_response: { nested: { value: 42 } },
+    };
+    const { finish } = mapPostToolUse(input);
+    expect(finish.output).toBe(JSON.stringify({ nested: { value: 42 } }));
+  });
+});
+
+describe('mapPostToolUseFailure', () => {
+  it('extracts error', () => {
+    const input = {
+      hook_event_name: 'PostToolUseFailure' as const,
+      tool_use_id: 'tu-1',
+      tool_name: 'Read',
+      tool_input: {},
+      error: 'File not found: /missing',
+    };
+    const { finish, toolUseId } = mapPostToolUseFailure(input);
+    expect(toolUseId).toBe('tu-1');
+    expect(finish.errorMessage).toBe('File not found: /missing');
+  });
+
+  it('stringifies non-string error', () => {
+    const input = {
+      hook_event_name: 'PostToolUseFailure' as const,
+      tool_use_id: 'tu-1',
+      tool_name: 'X',
+      tool_input: {},
+      error: { code: 'ENOENT', detail: 'nope' },
+    };
+    const { finish } = mapPostToolUseFailure(input);
+    expect(finish.errorMessage).toContain('ENOENT');
   });
 });
