@@ -28,7 +28,11 @@ jobs:
       - uses: changesets/action@v1
         with:
           publish: pnpm release
-          version: pnpm version
+          # `pnpm version` (no args) runs pnpm's builtin and prints version info
+          # without executing the `version` npm script — so `changeset version`
+          # never runs and no Version PR gets opened. `pnpm run version` forces
+          # the script in package.json (`changeset version`).
+          version: pnpm run version
           commit: 'chore: release packages'
           title: 'chore: release packages'
         env:
