@@ -98,4 +98,64 @@ describe('vercel-ai end-to-end (multi-step agent via withRun + wrapModel + wrapT
     expect(finishCalls).toHaveLength(1);
     expect(JSON.parse(finishCalls[0][1].body).status).toBe('completed');
   });
+
+  // JEN-61 regression: the original bug was that 8 of 12 events had `output=""`
+  // despite non-zero `outputTokens` — most of them were tool-use-only steps
+  // with no trailing text. End-to-end this verifies a streamed call that emits
+  // only a `tool-call` chunk (no `text-delta`) still lands `output` on the
+  // event POST body.
+  it('round-trips output for a streamed call that ends with only a tool-call chunk', async () => {
+    function streamingToolOnlyModel(): LanguageModelV3 {
+      return {
+        specificationVersion: 'v3',
+        provider: 'openai',
+        modelId: 'gpt-4o',
+        supportedUrls: {},
+        doGenerate: vi.fn(),
+        doStream: vi.fn().mockResolvedValue({
+          stream: new ReadableStream({
+            start(controller) {
+              controller.enqueue({
+                type: 'tool-call',
+                toolCallId: 'tc-stream-1',
+                toolName: 'lookup',
+                input: '{"q":"hi"}',
+              });
+              controller.enqueue({
+                type: 'finish',
+                finishReason: 'tool-calls',
+                usage: {
+                  inputTokens: { total: 8 },
+                  outputTokens: { total: 12 },
+                  totalTokens: 20,
+                },
+              });
+              controller.close();
+            },
+          }),
+        }),
+      } as unknown as LanguageModelV3;
+    }
+
+    const model = wrapModel(streamingToolOnlyModel(), { agentName: 'stream-tool', agentType: 'manual' });
+    const { stream } = await model.doStream(genCallOpts);
+    const reader = (stream as ReadableStream).getReader();
+    while (true) {
+      const { done } = await reader.read();
+      if (done) break;
+    }
+
+    const eventCalls = fetchMock.mock.calls.filter((c) => c[0].endsWith('/v1/events'));
+    const llmEvent = eventCalls.map((c) => JSON.parse(c[1].body)).find((b) => b.type === 'llm_call');
+    expect(llmEvent).toBeTruthy();
+    expect(llmEvent.outputTokens).toBe(12);
+    // Output must be a non-empty JSON-shaped tool_use payload — not undefined,
+    // not empty string.
+    expect(typeof llmEvent.output).toBe('string');
+    expect(llmEvent.output.length).toBeGreaterThan(0);
+    const parsed = JSON.parse(llmEvent.output);
+    expect(parsed.type).toBe('tool_use');
+    expect(parsed.name).toBe('lookup');
+    expect(parsed.input).toEqual({ q: 'hi' });
+  });
 });

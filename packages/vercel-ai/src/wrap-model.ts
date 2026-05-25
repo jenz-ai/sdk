@@ -61,11 +61,18 @@ function toolCallToJson(block: Record<string, unknown>): string | null {
   if (block?.type !== 'tool-call') return null;
   const toolName = typeof block.toolName === 'string' ? block.toolName : undefined;
   if (!toolName) return null;
+  // V3 spec types `input` as a JSON-stringified string, but the Anthropic
+  // `tool_use` shape the dashboard expects has `input` as a parsed object —
+  // unwrap before nesting so the wire payload isn't double-encoded.
+  let input: unknown = block.input;
+  if (typeof input === 'string') {
+    try { input = JSON.parse(input); } catch { /* leave as raw string if malformed */ }
+  }
   return safeStringify({
     type: 'tool_use',
     id: typeof block.toolCallId === 'string' ? block.toolCallId : undefined,
     name: toolName,
-    input: block.input,
+    input,
   });
 }
 

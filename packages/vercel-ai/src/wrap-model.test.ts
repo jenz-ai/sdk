@@ -509,8 +509,21 @@ describe('llmOutputText (content array helper)', () => {
     expect(parsed.type).toBe('tool_use');
     expect(parsed.name).toBe('Edit');
     expect(parsed.id).toBe('tc-1');
-    // input is stringified JSON on the wire — preserve as-is
-    expect(parsed.input).toBe('{"path":"/a"}');
+    // V3 emits `input` as a JSON string; we parse it before nesting so the
+    // wire payload matches the Anthropic shape (input is an object, not a
+    // double-encoded string).
+    expect(parsed.input).toEqual({ path: '/a' });
+  });
+
+  it('falls back to the raw string when input is not valid JSON', () => {
+    const block = {
+      type: 'tool-call',
+      toolCallId: 'tc-1',
+      toolName: 'Edit',
+      input: 'not-json',
+    };
+    const parsed = JSON.parse(llmOutputText([block]));
+    expect(parsed.input).toBe('not-json');
   });
 
   it('skips unknown block types', () => {
