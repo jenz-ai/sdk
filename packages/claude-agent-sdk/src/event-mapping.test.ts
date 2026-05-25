@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapAssistantMessage, mapPreToolUse, mapPostToolUse, mapPostToolUseFailure, detectIntegration } from './event-mapping.js';
+import { mapAssistantMessage, mapPreToolUse, mapPostToolUse, mapPostToolUseFailure, detectIntegration, llmOutputText } from './event-mapping.js';
 
 // Minimal SDKAssistantMessage shape — we only read what we map.
 // Real shape: { type:'assistant', message: BetaMessage, parent_tool_use_id, uuid, session_id }
@@ -10,11 +10,13 @@ function fakeAssistantMessage(opts: {
   outputTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  content?: unknown;
 }) {
   return {
     type: 'assistant' as const,
     message: {
       model: opts.model ?? 'claude-sonnet-4-6',
+      content: opts.content,
       usage: {
         input_tokens: opts.inputTokens ?? 100,
         output_tokens: opts.outputTokens ?? 50,
@@ -69,6 +71,100 @@ describe('mapAssistantMessage', () => {
     const { finish } = mapAssistantMessage(msg);
     expect(finish.inputTokens).toBeUndefined();
     expect(finish.outputTokens).toBeUndefined();
+  });
+
+  // JEN-60: output text was being dropped — llm_call events arrived at the api
+  // with empty output despite outputTokens > 0. Cover text-only, tool_use-only,
+  // mixed, and the no-content / non-array fall-throughs so the regression sticks.
+  it('captures text content blocks into finish.output', () => {
+    const msg = fakeAssistantMessage({
+      content: [{ type: 'text', text: 'Hello, world!' }],
+    });
+    const { finish } = mapAssistantMessage(msg);
+    expect(finish.output).toBe('Hello, world!');
+  });
+
+  it('captures tool_use blocks into finish.output (JSON-stringified)', () => {
+    const toolUse = { type: 'tool_use', id: 'tu-1', name: 'Read', input: { file_path: '/etc/hosts' } };
+    const msg = fakeAssistantMessage({ content: [toolUse] });
+    const { finish } = mapAssistantMessage(msg);
+    expect(finish.output).toBe(JSON.stringify(toolUse));
+  });
+
+  it('joins mixed text + tool_use blocks with newline', () => {
+    const toolUse = { type: 'tool_use', id: 'tu-1', name: 'Read', input: {} };
+    const msg = fakeAssistantMessage({
+      content: [
+        { type: 'text', text: 'Let me check that file.' },
+        toolUse,
+      ],
+    });
+    const { finish } = mapAssistantMessage(msg);
+    expect(finish.output).toBe(`Let me check that file.\n${JSON.stringify(toolUse)}`);
+  });
+
+  it('omits finish.output when content is missing', () => {
+    const msg = fakeAssistantMessage({});
+    expect((msg.message as any).content).toBeUndefined();
+    const { finish } = mapAssistantMessage(msg);
+    expect(finish.output).toBeUndefined();
+  });
+
+  it('omits finish.output when content array is empty', () => {
+    const msg = fakeAssistantMessage({ content: [] });
+    const { finish } = mapAssistantMessage(msg);
+    expect(finish.output).toBeUndefined();
+  });
+
+  it('omits finish.output when content has only unknown block types', () => {
+    const msg = fakeAssistantMessage({
+      content: [{ type: 'thinking', thinking: 'hmm' } as any],
+    });
+    const { finish } = mapAssistantMessage(msg);
+    expect(finish.output).toBeUndefined();
+  });
+});
+
+describe('llmOutputText', () => {
+  it('returns empty string for non-array input', () => {
+    expect(llmOutputText(undefined)).toBe('');
+    expect(llmOutputText(null)).toBe('');
+    expect(llmOutputText('not-an-array')).toBe('');
+    expect(llmOutputText({} as any)).toBe('');
+  });
+
+  it('returns empty string for an empty array', () => {
+    expect(llmOutputText([])).toBe('');
+  });
+
+  it('joins text blocks with newline', () => {
+    expect(
+      llmOutputText([
+        { type: 'text', text: 'first' },
+        { type: 'text', text: 'second' },
+      ]),
+    ).toBe('first\nsecond');
+  });
+
+  it('serialises tool_use blocks as JSON so the dashboard can render "→ wants to call X"', () => {
+    const block = { type: 'tool_use', id: 'tu-1', name: 'Edit', input: { path: '/a' } };
+    expect(llmOutputText([block])).toBe(JSON.stringify(block));
+  });
+
+  it('skips unknown block types', () => {
+    expect(
+      llmOutputText([
+        { type: 'thinking', thinking: 'internal' },
+        { type: 'text', text: 'visible' },
+      ]),
+    ).toBe('visible');
+  });
+
+  it('clips output at 8000 chars', () => {
+    const huge = { type: 'text', text: 'x'.repeat(10_000) };
+    const out = llmOutputText([huge]);
+    expect(out.length).toBeLessThanOrEqual(8000);
+    expect(out.endsWith('…')).toBe(true);
   });
 });
 

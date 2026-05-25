@@ -73,7 +73,14 @@ describe('integration: full query() round-trip against fake Hono backend', () =>
 
   it('records POST /v1/runs + POST /v1/events (llm_call) + PATCH /v1/runs/:id (finish)', async () => {
     claudeQueryMock.mockReturnValue(upstreamFromMsgs([
-      { type: 'assistant', message: { model: 'claude-sonnet-4-6', usage: { input_tokens: 100, output_tokens: 40 } } },
+      {
+        type: 'assistant',
+        message: {
+          model: 'claude-sonnet-4-6',
+          content: [{ type: 'text', text: 'Hi there!' }],
+          usage: { input_tokens: 100, output_tokens: 40 },
+        },
+      },
       { type: 'result', subtype: 'success', result: 'ok', total_cost_usd: 0.001, duration_ms: 250, num_turns: 1 },
     ]));
 
@@ -98,6 +105,8 @@ describe('integration: full query() round-trip against fake Hono backend', () =>
     expect(llmEvent!.body.provider).toBe('anthropic');
     expect(llmEvent!.body.inputTokens).toBe(100);
     expect(llmEvent!.body.outputTokens).toBe(40);
+    // JEN-60: assistant text must round-trip into the event's output field.
+    expect(llmEvent!.body.output).toBe('Hi there!');
 
     expect(patch_run).toHaveLength(1);
     expect(patch_run[0].body.status).toBe('completed');
