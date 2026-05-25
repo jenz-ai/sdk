@@ -96,7 +96,7 @@ export function detectIntegration(toolName: string): string | undefined {
   if (!toolName.startsWith('mcp__')) return undefined;
   const parts = toolName.split('__');
   if (parts.length < 3) return undefined;
-  const plugin = parts[1]
+  const plugin = (parts[1] ?? '')
     .toLowerCase()
     .replace(/^claude_ai_/, '')
     .replace(/^plugin_/, '');
