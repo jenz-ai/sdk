@@ -13,6 +13,7 @@ import {
   createFunctionSpan,
   createGenerationSpan,
   createHandoffSpan,
+  createResponseSpan,
   withTrace,
   setTracingDisabled,
 } from '@openai/agents-core';
@@ -128,6 +129,43 @@ describe('JenzTracingProcessor — real SDK contract', () => {
       const finishMock = (run.startEvent as any).mock.results.at(-1)?.value.finish;
       expect(finishMock).toHaveBeenCalledWith(
         expect.objectContaining({ output: 'Hello from gpt-4o.' }),
+      );
+    });
+  });
+
+  it('processor maps real response span → llm_call event with model + output text (JEN-62)', async () => {
+    // Upstream gotcha: createResponseSpan() ignores its data argument
+    // (see @openai/agents-core/tracing/createSpans — `options = {}` at line 42).
+    // The real callers in @openai/agents-openai create an empty span and then
+    // mutate `spanData._response` directly after the fetch returns. Mirror that.
+    const run = fakeRun();
+    const p = new JenzTracingProcessor(fakeClient(run), {});
+    await withTrace('contract', async () => {
+      const respSpan = createResponseSpan();
+      respSpan.start();
+      respSpan.spanData.response_id = 'resp_1';
+      (respSpan.spanData as any)._response = {
+        model: 'gpt-4o-mini',
+        usage: { input_tokens: 10, output_tokens: 5 },
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'Hi from responses API.' }],
+          },
+        ],
+      };
+      respSpan.end();
+
+      await p.onTraceStart({ traceId: respSpan.traceId, name: 'contract' } as any);
+      await p.onSpanEnd(respSpan);
+
+      expect(run.startEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'llm_call', model: 'gpt-4o-mini' }),
+      );
+      const finishMock = (run.startEvent as any).mock.results.at(-1)?.value.finish;
+      expect(finishMock).toHaveBeenCalledWith(
+        expect.objectContaining({ output: 'Hi from responses API.' }),
       );
     });
   });

@@ -8,6 +8,7 @@ import {
   setTracingDisabled,
   withTrace,
   createGenerationSpan,
+  createResponseSpan,
 } from '@openai/agents-core';
 
 // Stub LLM model — implements the bare minimum the SDK needs.
@@ -141,6 +142,36 @@ describe('@jenz-ai/openai-agents integration', () => {
     expect(llmEvent).toBeDefined();
     expect((llmEvent!.body as any).output).toBe('Hello round-trip.');
     expect((llmEvent!.body as any).outputTokens).toBe(5);
+  });
+
+  it('response span output text round-trips to POST /v1/events body (JEN-62)', async () => {
+    // Upstream gotcha: createResponseSpan() ignores its data arg — mirror the
+    // canonical flow in @openai/agents-openai by mutating spanData._response.
+    setupJenz();
+    await withTrace('contract-trace', async () => {
+      const respSpan = createResponseSpan();
+      respSpan.start();
+      respSpan.spanData.response_id = 'resp_1';
+      (respSpan.spanData as any)._response = {
+        model: 'gpt-4o-mini',
+        usage: { input_tokens: 10, output_tokens: 5 },
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'Responses round-trip.' }],
+          },
+        ],
+      };
+      respSpan.end();
+    });
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const eventCalls = calls.filter((c) => c.url.endsWith('/v1/events') && c.method === 'POST');
+    const llmEvent = eventCalls.find((c) => (c.body as any)?.type === 'llm_call');
+    expect(llmEvent).toBeDefined();
+    expect((llmEvent!.body as any).output).toBe('Responses round-trip.');
   });
 
   it('withRun + getActiveRun wires through with framework/agentName/signal', async () => {

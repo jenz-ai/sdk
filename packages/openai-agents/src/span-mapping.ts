@@ -82,6 +82,7 @@ function mapResponse(
   const usage = resp.usage ?? {};
   const cacheReadTokens =
     usage.details?.input_tokens_details?.cached_tokens;
+  const output = responseOutputText(resp.output);
   return {
     start: {
       type: 'llm_call',
@@ -90,6 +91,7 @@ function mapResponse(
       metadata,
     },
     finish: {
+      output: output || undefined,
       inputTokens: usage.input_tokens,
       outputTokens: usage.output_tokens,
       cacheReadTokens,
@@ -153,6 +155,47 @@ export function generationOutputText(output: unknown): string {
           );
         }
       }
+    }
+  }
+  return clip(parts.join('\n'), LLM_OUTPUT_LIMIT);
+}
+
+/**
+ * Extract assistant text from a response span's `_response.output` (Responses
+ * API shape: an array of items — `{ type: 'message', content: [{ type:
+ * 'output_text', text }] }` for assistant text, `{ type: 'function_call',
+ * name, arguments }` for tool calls). Function calls are normalised into a
+ * `{ type: 'tool_use', name }` JSON blob so the dashboard recognises them.
+ * Clipped to LLM_OUTPUT_LIMIT. Returns '' when nothing usable is found.
+ */
+export function responseOutputText(output: unknown): string {
+  if (!Array.isArray(output)) return '';
+  const parts: string[] = [];
+  for (const item of output as Array<Record<string, unknown>>) {
+    const itemType = item?.type;
+    if (itemType === 'message') {
+      const content = item.content;
+      if (Array.isArray(content)) {
+        for (const block of content as Array<Record<string, unknown>>) {
+          if (block?.type === 'output_text' && typeof block.text === 'string') {
+            parts.push(block.text);
+          }
+        }
+      }
+    } else if (itemType === 'function_call' && typeof item.name === 'string') {
+      parts.push(
+        safeStringify({
+          type: 'tool_use',
+          id:
+            typeof item.call_id === 'string'
+              ? item.call_id
+              : typeof item.id === 'string'
+                ? item.id
+                : undefined,
+          name: item.name,
+          input: item.arguments,
+        }),
+      );
     }
   }
   return clip(parts.join('\n'), LLM_OUTPUT_LIMIT);

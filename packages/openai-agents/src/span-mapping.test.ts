@@ -216,6 +216,117 @@ describe('mapSpanToEvent — response spans', () => {
     const payload = mapSpanToEvent(span, undefined);
     expect(payload!.finish.cacheReadTokens).toBe(75);
   });
+
+  // JEN-62: response spans (Responses API) emit `_response.output` as an array
+  // of items — `{ type: 'message', content: [{ type: 'output_text', text }] }`
+  // for assistant text, `{ type: 'function_call', name, arguments }` for tool
+  // calls. Both were being dropped, leaving llm_call events with empty `output`.
+  it('captures assistant text from response span _response.output output_text items', () => {
+    const span = fakeSpan({
+      type: 'response',
+      _response: {
+        model: 'gpt-4o',
+        usage: { input_tokens: 10, output_tokens: 5 },
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'Hello there!' }],
+          },
+        ],
+      },
+    });
+    const payload = mapSpanToEvent(span, undefined);
+    expect(payload!.finish.output).toBe('Hello there!');
+  });
+
+  it('captures response span function_call items as JSON the dashboard can render', () => {
+    const span = fakeSpan({
+      type: 'response',
+      _response: {
+        model: 'gpt-4o',
+        output: [
+          {
+            type: 'function_call',
+            call_id: 'call_1',
+            name: 'lookup_account',
+            arguments: '{"id":"acc-9"}',
+          },
+        ],
+      },
+    });
+    const payload = mapSpanToEvent(span, undefined);
+    expect(payload!.finish.output).toBeDefined();
+    const parsed = JSON.parse(payload!.finish.output!);
+    expect(parsed).toMatchObject({ type: 'tool_use', name: 'lookup_account' });
+  });
+
+  it('joins response span message text + function_call into mixed output', () => {
+    const span = fakeSpan({
+      type: 'response',
+      _response: {
+        model: 'gpt-4o',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'I will look that up.' }],
+          },
+          {
+            type: 'function_call',
+            call_id: 'call_1',
+            name: 'lookup_account',
+            arguments: '{}',
+          },
+        ],
+      },
+    });
+    const payload = mapSpanToEvent(span, undefined);
+    expect(payload!.finish.output).toContain('I will look that up.');
+    expect(payload!.finish.output).toContain('lookup_account');
+    expect(payload!.finish.output).toContain('"type":"tool_use"');
+  });
+
+  it('concatenates multiple output_text segments in a single message item', () => {
+    const span = fakeSpan({
+      type: 'response',
+      _response: {
+        model: 'gpt-4o',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [
+              { type: 'output_text', text: 'first' },
+              { type: 'output_text', text: 'second' },
+            ],
+          },
+        ],
+      },
+    });
+    const payload = mapSpanToEvent(span, undefined);
+    expect(payload!.finish.output).toBe('first\nsecond');
+  });
+
+  it('omits finish.output when response span has no output items', () => {
+    const span = fakeSpan({
+      type: 'response',
+      _response: { model: 'gpt-4o', usage: { input_tokens: 10, output_tokens: 5 } },
+    });
+    const payload = mapSpanToEvent(span, undefined);
+    expect(payload!.finish.output).toBeUndefined();
+  });
+
+  it('omits finish.output when response span has only unknown item types', () => {
+    const span = fakeSpan({
+      type: 'response',
+      _response: {
+        output: [{ type: 'reasoning', summary: [] }],
+      },
+    });
+    const payload = mapSpanToEvent(span, undefined);
+    expect(payload!.finish.output).toBeUndefined();
+  });
 });
 
 describe('mapSpanToEvent — function spans', () => {
