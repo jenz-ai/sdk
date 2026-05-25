@@ -75,6 +75,109 @@ describe('mapSpanToEvent — generation spans', () => {
     const payload = mapSpanToEvent(span, undefined);
     expect(payload!.start.provider).toBe('openai');
   });
+
+  // JEN-62: output text was being dropped from generation spans — llm_call events
+  // arrived at the api with empty `output` despite `outputTokens > 0`. The
+  // upstream sets `spanData.output = [response]` where `response` is the raw
+  // OpenAI chat-completion response (with `.choices[0].message.{content,tool_calls}`).
+  it('captures assistant text from generation span output[0].choices[0].message.content', () => {
+    const span = fakeSpan({
+      type: 'generation',
+      model: 'gpt-4o',
+      usage: { input_tokens: 10, output_tokens: 5 },
+      output: [
+        {
+          choices: [
+            { message: { role: 'assistant', content: 'Hello from the model.' } },
+          ],
+        },
+      ],
+    });
+    const payload = mapSpanToEvent(span, undefined);
+    expect(payload!.finish.output).toBe('Hello from the model.');
+  });
+
+  it('captures generation span tool_calls as JSON the dashboard can render as → wants to call X', () => {
+    const span = fakeSpan({
+      type: 'generation',
+      model: 'gpt-4o',
+      output: [
+        {
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'call_1',
+                    type: 'function',
+                    function: { name: 'search_web', arguments: '{"q":"hi"}' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const payload = mapSpanToEvent(span, undefined);
+    // Dashboard's describeToolUse parses the JSON and looks for `type: 'tool_use'`
+    // with a `name` field — so normalise OpenAI's nested function-call shape.
+    expect(payload!.finish.output).toBeDefined();
+    const parsed = JSON.parse(payload!.finish.output!);
+    expect(parsed).toMatchObject({ type: 'tool_use', name: 'search_web' });
+  });
+
+  it('joins assistant text + tool_calls into a single output (mixed)', () => {
+    const span = fakeSpan({
+      type: 'generation',
+      model: 'gpt-4o',
+      output: [
+        {
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: 'Let me search that.',
+                tool_calls: [
+                  {
+                    id: 'call_1',
+                    type: 'function',
+                    function: { name: 'search_web', arguments: '{}' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const payload = mapSpanToEvent(span, undefined);
+    expect(payload!.finish.output).toContain('Let me search that.');
+    expect(payload!.finish.output).toContain('search_web');
+    expect(payload!.finish.output).toContain('"type":"tool_use"');
+  });
+
+  it('omits finish.output when generation span has no output array', () => {
+    const span = fakeSpan({
+      type: 'generation',
+      model: 'gpt-4o',
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    const payload = mapSpanToEvent(span, undefined);
+    expect(payload!.finish.output).toBeUndefined();
+  });
+
+  it('omits finish.output when generation choices yield no usable content', () => {
+    const span = fakeSpan({
+      type: 'generation',
+      model: 'gpt-4o',
+      output: [{ choices: [{ message: { role: 'assistant', content: null } }] }],
+    });
+    const payload = mapSpanToEvent(span, undefined);
+    expect(payload!.finish.output).toBeUndefined();
+  });
 });
 
 describe('mapSpanToEvent — response spans', () => {
