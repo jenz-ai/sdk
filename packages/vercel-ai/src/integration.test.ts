@@ -82,6 +82,16 @@ describe('vercel-ai end-to-end (multi-step agent via withRun + wrapModel + wrapT
     const eventTypes = eventCalls.map((c) => JSON.parse(c[1].body).type);
     expect(eventTypes).toEqual(['llm_call', 'tool_call', 'llm_call']);
 
+    // JEN-61: assistant text from result.content must round-trip into the
+    // llm_call event's output field on the wire.
+    const llmEventBodies = eventCalls
+      .map((c) => JSON.parse(c[1].body))
+      .filter((b) => b.type === 'llm_call');
+    expect(llmEventBodies).toHaveLength(2);
+    for (const body of llmEventBodies) {
+      expect(body.output).toBe('reply');
+    }
+
     const finishCalls = fetchMock.mock.calls.filter(
       (c) => c[0].includes('/v1/runs/r1') && c[1].method === 'PATCH',
     );
