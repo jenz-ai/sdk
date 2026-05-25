@@ -137,4 +137,37 @@ describe('event-mapping contract against real @anthropic-ai/claude-agent-sdk typ
     expect(finish.cacheReadTokens).toBe(10);
     expect(finish.cacheWriteTokens).toBe(5);
   });
+
+  it('SDKAssistantMessage with text + tool_use content captures output text (JEN-60)', () => {
+    const toolUse = { type: 'tool_use' as const, id: 'tu-1', name: 'Read', input: { file_path: '/a' } };
+    const msg: SDKAssistantMessage = {
+      type: 'assistant',
+      message: {
+        id: 'msg-2',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-opus-4-7',
+        content: [
+          { type: 'text', text: 'Let me look that up.' },
+          toolUse,
+        ],
+        stop_reason: 'tool_use',
+        stop_sequence: null,
+        usage: {
+          input_tokens: 200,
+          output_tokens: 30,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          service_tier: 'standard',
+        },
+      } as any,
+      parent_tool_use_id: null,
+      uuid: 'uuid-2',
+      session_id: 'sess-1',
+    };
+    const { finish } = mapAssistantMessage(msg);
+    expect(finish.output).toContain('Let me look that up.');
+    expect(finish.output).toContain('tool_use');
+    expect(finish.output).toContain('Read');
+  });
 });

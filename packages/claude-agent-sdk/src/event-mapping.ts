@@ -7,6 +7,7 @@ export interface AssistantMessageLike {
   type: 'assistant';
   message: {
     model?: string;
+    content?: unknown;
     usage?: {
       input_tokens?: number;
       output_tokens?: number;
@@ -23,6 +24,7 @@ export interface MappedEvent {
 
 export function mapAssistantMessage(msg: AssistantMessageLike): MappedEvent {
   const usage = msg.message.usage;
+  const output = llmOutputText(msg.message.content);
   return {
     start: {
       type: 'llm_call',
@@ -30,6 +32,7 @@ export function mapAssistantMessage(msg: AssistantMessageLike): MappedEvent {
       provider: 'anthropic',
     },
     finish: {
+      output: output || undefined,
       inputTokens: usage?.input_tokens,
       outputTokens: usage?.output_tokens,
       cacheReadTokens: usage?.cache_read_input_tokens,
@@ -39,6 +42,7 @@ export function mapAssistantMessage(msg: AssistantMessageLike): MappedEvent {
 }
 
 const TOOL_INPUT_LIMIT = 4096;
+const LLM_OUTPUT_LIMIT = 8000;
 
 function safeStringify(value: unknown): string {
   if (value === undefined) return '';
@@ -53,6 +57,26 @@ function safeStringify(value: unknown): string {
 
 function clip(s: string, max = TOOL_INPUT_LIMIT): string {
   return s.length <= max ? s : s.slice(0, max - 1) + '…';
+}
+
+/**
+ * Concatenate text blocks from an assistant message's `content` array into a
+ * single string for the event's `output` field. Tool-use blocks are kept as
+ * JSON so the dashboard's outputPreview() can render "→ wants to call X" on
+ * ReAct-style intermediate steps that produced no text. Mirrors the equivalent
+ * helper in `@jenz-ai/anthropic-sdk`. Returns '' for non-arrays / empty input.
+ */
+export function llmOutputText(content: unknown): string {
+  if (!Array.isArray(content)) return '';
+  const parts: string[] = [];
+  for (const block of content as Array<Record<string, unknown>>) {
+    if (block?.type === 'text' && typeof block.text === 'string') {
+      parts.push(block.text);
+    } else if (block?.type === 'tool_use' && typeof block.name === 'string') {
+      parts.push(safeStringify(block));
+    }
+  }
+  return clip(parts.join('\n'), LLM_OUTPUT_LIMIT);
 }
 
 /**
