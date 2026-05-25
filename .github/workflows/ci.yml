@@ -19,6 +19,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Adapter packages import from `@jenz-ai/sdk` (the `packages/core` workspace),
+      # which resolves to `packages/core/dist` at type-check and test time. Build
+      # first so those artifacts exist — pnpm respects workspace dependency order,
+      # so `core` is built before the adapters.
+      - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm test
-      - run: pnpm build
