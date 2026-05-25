@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { LanguageModelV3, LanguageModelV3StreamPart } from '@ai-sdk/provider';
-import { wrapModel } from './wrap-model.js';
+import { wrapModel, llmOutputText, llmOutputFromStreamChunks } from './wrap-model.js';
 import { withRun } from './with-run.js';
 
 function fakeModel(overrides: Partial<LanguageModelV3> = {}): LanguageModelV3 {
@@ -234,5 +234,347 @@ describe('wrapModel', () => {
     const result = await model.doGenerate(genCallOpts);
     expect(inner.doGenerate).toHaveBeenCalled();
     expect((result as { content: unknown[] }).content).toBeDefined();
+  });
+
+  // JEN-61: output text was being dropped — llm_call events arrived at the api
+  // with empty output despite outputTokens > 0. Cover wrapGenerate's text-only,
+  // tool-call-only, mixed, and empty fall-throughs; then the streaming side.
+  describe('JEN-61: finish.output from generate result.content', () => {
+    it('captures text content blocks into finish.output', async () => {
+      const model = wrapModel(fakeModel(), { agentName: 'gen-text', agentType: 'manual' });
+      await model.doGenerate(genCallOpts);
+
+      const eventCalls = fetchMock.mock.calls.filter((c) => c[0].endsWith('/v1/events'));
+      const body = JSON.parse(eventCalls[0][1].body);
+      expect(body.output).toBe('hello');
+    });
+
+    it('captures tool-call blocks into finish.output (JSON-stringified tool_use shape)', async () => {
+      const model = wrapModel(
+        fakeModel({
+          doGenerate: vi.fn().mockResolvedValue({
+            content: [
+              {
+                type: 'tool-call',
+                toolCallId: 'tc-1',
+                toolName: 'lookup',
+                input: '{"q":"hi"}',
+              },
+            ],
+            finishReason: 'tool-calls',
+            usage: {
+              inputTokens: { total: 10 },
+              outputTokens: { total: 0 },
+              totalTokens: 10,
+            },
+            warnings: [],
+          }),
+        }),
+        { agentName: 'gen-tool', agentType: 'manual' },
+      );
+      await model.doGenerate(genCallOpts);
+
+      const eventCalls = fetchMock.mock.calls.filter((c) => c[0].endsWith('/v1/events'));
+      const body = JSON.parse(eventCalls[0][1].body);
+      // Dashboard's preview detector requires the `tool_use` shape (with `name`)
+      // so we normalise from Vercel's `tool-call` shape on the way out.
+      const parsed = JSON.parse(body.output);
+      expect(parsed.type).toBe('tool_use');
+      expect(parsed.name).toBe('lookup');
+      expect(parsed.id).toBe('tc-1');
+    });
+
+    it('joins mixed text + tool-call blocks with newline', async () => {
+      const model = wrapModel(
+        fakeModel({
+          doGenerate: vi.fn().mockResolvedValue({
+            content: [
+              { type: 'text', text: 'Let me check.' },
+              {
+                type: 'tool-call',
+                toolCallId: 'tc-1',
+                toolName: 'lookup',
+                input: '{}',
+              },
+            ],
+            finishReason: 'tool-calls',
+            usage: {
+              inputTokens: { total: 5 },
+              outputTokens: { total: 4 },
+              totalTokens: 9,
+            },
+            warnings: [],
+          }),
+        }),
+        { agentName: 'gen-mixed', agentType: 'manual' },
+      );
+      await model.doGenerate(genCallOpts);
+
+      const eventCalls = fetchMock.mock.calls.filter((c) => c[0].endsWith('/v1/events'));
+      const body = JSON.parse(eventCalls[0][1].body);
+      const lines = body.output.split('\n');
+      expect(lines[0]).toBe('Let me check.');
+      const parsed = JSON.parse(lines[1]);
+      expect(parsed.type).toBe('tool_use');
+      expect(parsed.name).toBe('lookup');
+    });
+
+    it('omits finish.output when content is empty', async () => {
+      const model = wrapModel(
+        fakeModel({
+          doGenerate: vi.fn().mockResolvedValue({
+            content: [],
+            finishReason: 'stop',
+            usage: {
+              inputTokens: { total: 1 },
+              outputTokens: { total: 0 },
+              totalTokens: 1,
+            },
+            warnings: [],
+          }),
+        }),
+        { agentName: 'gen-empty', agentType: 'manual' },
+      );
+      await model.doGenerate(genCallOpts);
+
+      const eventCalls = fetchMock.mock.calls.filter((c) => c[0].endsWith('/v1/events'));
+      const body = JSON.parse(eventCalls[0][1].body);
+      expect(body.output).toBeUndefined();
+    });
+  });
+
+  describe('JEN-61: finish.output from streaming chunks', () => {
+    it('accumulates text-delta chunks into finish.output', async () => {
+      const model = wrapModel(
+        streamingModel([
+          { type: 'stream-start', warnings: [] } as never,
+          { type: 'text-start', id: 't1' } as never,
+          { type: 'text-delta', id: 't1', delta: 'Hello' } as never,
+          { type: 'text-delta', id: 't1', delta: ', world' } as never,
+          { type: 'text-end', id: 't1' } as never,
+          {
+            type: 'finish',
+            finishReason: 'stop',
+            usage: {
+              inputTokens: { total: 20 },
+              outputTokens: { total: 8 },
+              totalTokens: 28,
+            },
+          } as never,
+        ]),
+        { agentName: 'stream-text', agentType: 'manual' },
+      );
+
+      const { stream } = await model.doStream(genCallOpts);
+      await drainStream(stream);
+      await new Promise((r) => setTimeout(r, 30));
+
+      const eventCalls = fetchMock.mock.calls.filter((c) => c[0].endsWith('/v1/events'));
+      const body = JSON.parse(eventCalls[0][1].body);
+      expect(body.output).toBe('Hello, world');
+    });
+
+    it('records tool-call chunks into finish.output (JSON-stringified tool_use shape)', async () => {
+      const model = wrapModel(
+        streamingModel([
+          { type: 'stream-start', warnings: [] } as never,
+          {
+            type: 'tool-call',
+            toolCallId: 'tc-1',
+            toolName: 'lookup',
+            input: '{"q":"x"}',
+          } as never,
+          {
+            type: 'finish',
+            finishReason: 'tool-calls',
+            usage: {
+              inputTokens: { total: 5 },
+              outputTokens: { total: 4 },
+              totalTokens: 9,
+            },
+          } as never,
+        ]),
+        { agentName: 'stream-tool', agentType: 'manual' },
+      );
+
+      const { stream } = await model.doStream(genCallOpts);
+      await drainStream(stream);
+      await new Promise((r) => setTimeout(r, 30));
+
+      const eventCalls = fetchMock.mock.calls.filter((c) => c[0].endsWith('/v1/events'));
+      const body = JSON.parse(eventCalls[0][1].body);
+      const parsed = JSON.parse(body.output);
+      expect(parsed.type).toBe('tool_use');
+      expect(parsed.name).toBe('lookup');
+      expect(parsed.id).toBe('tc-1');
+    });
+
+    it('joins mixed text-delta + tool-call chunks with newline', async () => {
+      const model = wrapModel(
+        streamingModel([
+          { type: 'stream-start', warnings: [] } as never,
+          { type: 'text-start', id: 't1' } as never,
+          { type: 'text-delta', id: 't1', delta: 'Looking up.' } as never,
+          { type: 'text-end', id: 't1' } as never,
+          {
+            type: 'tool-call',
+            toolCallId: 'tc-1',
+            toolName: 'lookup',
+            input: '{}',
+          } as never,
+          {
+            type: 'finish',
+            finishReason: 'tool-calls',
+            usage: {
+              inputTokens: { total: 10 },
+              outputTokens: { total: 6 },
+              totalTokens: 16,
+            },
+          } as never,
+        ]),
+        { agentName: 'stream-mixed', agentType: 'manual' },
+      );
+
+      const { stream } = await model.doStream(genCallOpts);
+      await drainStream(stream);
+      await new Promise((r) => setTimeout(r, 30));
+
+      const eventCalls = fetchMock.mock.calls.filter((c) => c[0].endsWith('/v1/events'));
+      const body = JSON.parse(eventCalls[0][1].body);
+      const lines = body.output.split('\n');
+      expect(lines[0]).toBe('Looking up.');
+      const parsed = JSON.parse(lines[1]);
+      expect(parsed.type).toBe('tool_use');
+      expect(parsed.name).toBe('lookup');
+    });
+
+    it('omits finish.output when stream contains no text or tool chunks', async () => {
+      const model = wrapModel(
+        streamingModel([
+          { type: 'stream-start', warnings: [] } as never,
+          {
+            type: 'finish',
+            finishReason: 'stop',
+            usage: {
+              inputTokens: { total: 1 },
+              outputTokens: { total: 0 },
+              totalTokens: 1,
+            },
+          } as never,
+        ]),
+        { agentName: 'stream-empty', agentType: 'manual' },
+      );
+
+      const { stream } = await model.doStream(genCallOpts);
+      await drainStream(stream);
+      await new Promise((r) => setTimeout(r, 30));
+
+      const eventCalls = fetchMock.mock.calls.filter((c) => c[0].endsWith('/v1/events'));
+      const body = JSON.parse(eventCalls[0][1].body);
+      expect(body.output).toBeUndefined();
+    });
+  });
+});
+
+describe('llmOutputText (content array helper)', () => {
+  it('returns empty string for non-array input', () => {
+    expect(llmOutputText(undefined)).toBe('');
+    expect(llmOutputText(null)).toBe('');
+    expect(llmOutputText('not-an-array')).toBe('');
+    expect(llmOutputText({} as unknown)).toBe('');
+  });
+
+  it('returns empty string for an empty array', () => {
+    expect(llmOutputText([])).toBe('');
+  });
+
+  it('joins text blocks with newline', () => {
+    expect(
+      llmOutputText([
+        { type: 'text', text: 'first' },
+        { type: 'text', text: 'second' },
+      ]),
+    ).toBe('first\nsecond');
+  });
+
+  it('serialises tool-call blocks into the dashboard-friendly tool_use shape', () => {
+    const block = {
+      type: 'tool-call',
+      toolCallId: 'tc-1',
+      toolName: 'Edit',
+      input: '{"path":"/a"}',
+    };
+    const out = llmOutputText([block]);
+    const parsed = JSON.parse(out);
+    expect(parsed.type).toBe('tool_use');
+    expect(parsed.name).toBe('Edit');
+    expect(parsed.id).toBe('tc-1');
+    // V3 emits `input` as a JSON string; we parse it before nesting so the
+    // wire payload matches the Anthropic shape (input is an object, not a
+    // double-encoded string).
+    expect(parsed.input).toEqual({ path: '/a' });
+  });
+
+  it('falls back to the raw string when input is not valid JSON', () => {
+    const block = {
+      type: 'tool-call',
+      toolCallId: 'tc-1',
+      toolName: 'Edit',
+      input: 'not-json',
+    };
+    const parsed = JSON.parse(llmOutputText([block]));
+    expect(parsed.input).toBe('not-json');
+  });
+
+  it('skips unknown block types', () => {
+    expect(
+      llmOutputText([
+        { type: 'reasoning', text: 'internal' },
+        { type: 'text', text: 'visible' },
+      ]),
+    ).toBe('visible');
+  });
+
+  it('clips output at 8000 chars', () => {
+    const huge = { type: 'text', text: 'x'.repeat(10_000) };
+    const out = llmOutputText([huge]);
+    expect(out.length).toBeLessThanOrEqual(8000);
+    expect(out.endsWith('…')).toBe(true);
+  });
+});
+
+describe('llmOutputFromStreamChunks (stream accumulator helper)', () => {
+  it('returns empty string when no relevant chunks were collected', () => {
+    expect(llmOutputFromStreamChunks('', [])).toBe('');
+  });
+
+  it('returns just text when there are no tool-call chunks', () => {
+    expect(llmOutputFromStreamChunks('Hello, world', [])).toBe('Hello, world');
+  });
+
+  it('returns just tool_use JSON when there is no text', () => {
+    const out = llmOutputFromStreamChunks('', [
+      { type: 'tool-call', toolCallId: 'tc-1', toolName: 'X', input: '{}' },
+    ]);
+    const parsed = JSON.parse(out);
+    expect(parsed.type).toBe('tool_use');
+    expect(parsed.name).toBe('X');
+  });
+
+  it('joins text then tool calls with newlines', () => {
+    const out = llmOutputFromStreamChunks('Thinking…', [
+      { type: 'tool-call', toolCallId: 'tc-1', toolName: 'A', input: '{}' },
+      { type: 'tool-call', toolCallId: 'tc-2', toolName: 'B', input: '{}' },
+    ]);
+    const lines = out.split('\n');
+    expect(lines[0]).toBe('Thinking…');
+    expect(JSON.parse(lines[1]).name).toBe('A');
+    expect(JSON.parse(lines[2]).name).toBe('B');
+  });
+
+  it('clips output at 8000 chars', () => {
+    const out = llmOutputFromStreamChunks('x'.repeat(10_000), []);
+    expect(out.length).toBeLessThanOrEqual(8000);
+    expect(out.endsWith('…')).toBe(true);
   });
 });
